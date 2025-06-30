@@ -1,0 +1,288 @@
+# Color Quantification Tool - PowerShell Download Script
+# Automatically downloads the latest version from multiple mirrors
+
+param(
+    [string]$OutputPath = ".",
+    [switch]$Force,
+    [switch]$Verify
+)
+
+# Configuration
+$FileName = "ColorQuantificationTool.exe"
+$ExpectedSize = 1145549802  # 1.1GB in bytes
+$ExpectedMD5 = ""  # To be filled after upload
+$ExpectedSHA256 = ""  # To be filled after upload
+
+# Download mirrors (will be updated with actual links)
+$DownloadMirrors = @(
+    @{
+        Name = "Google Drive"
+        Url = "https://drive.google.com/uc?id=YOUR_GOOGLE_DRIVE_FILE_ID&export=download"
+        Priority = 1
+    },
+    @{
+        Name = "OneDrive"
+        Url = "https://onedrive.live.com/download?cid=YOUR_ONEDRIVE_CID&resid=YOUR_RESID"
+        Priority = 2
+    },
+    @{
+        Name = "SourceForge"
+        Url = "https://sourceforge.net/projects/colorquantificationtool/files/latest/download"
+        Priority = 3
+    },
+    @{
+        Name = "MediaFire"
+        Url = "https://www.mediafire.com/file/YOUR_FILE_ID/ColorQuantificationTool.exe/file"
+        Priority = 4
+    }
+)
+
+# Sort by priority
+$DownloadMirrors = $DownloadMirrors | Sort-Object Priority
+
+function Write-Banner {
+    Write-Host "=" * 70 -ForegroundColor Cyan
+    Write-Host "🎨 Color Quantification Tool - PowerShell Downloader" -ForegroundColor Yellow
+    Write-Host "=" * 70 -ForegroundColor Cyan
+    Write-Host "📁 Target File: $FileName" -ForegroundColor White
+    Write-Host "📏 File Size: $([math]::Round($ExpectedSize / 1GB, 1)) GB" -ForegroundColor White
+    Write-Host "🌐 Available Mirrors: $($DownloadMirrors.Count)" -ForegroundColor White
+    Write-Host "=" * 70 -ForegroundColor Cyan
+}
+
+function Test-ExistingFile {
+    param([string]$FilePath)
+    
+    if (Test-Path $FilePath) {
+        Write-Host "📁 Found existing file: $FilePath" -ForegroundColor Yellow
+        $FileSize = (Get-Item $FilePath).Length
+        Write-Host "📏 File size: $([math]::Round($FileSize / 1GB, 1)) GB" -ForegroundColor White
+        
+        if ($FileSize -eq $ExpectedSize) {
+            Write-Host "✅ File size matches expected size" -ForegroundColor Green
+            
+            if ($Verify -and (Test-FileIntegrity $FilePath)) {
+                Write-Host "✅ File integrity verified - download not needed!" -ForegroundColor Green
+                return $true
+            } elseif (-not $Verify) {
+                Write-Host "⚠️  Skipping integrity check (use -Verify to enable)" -ForegroundColor Yellow
+                return $true
+            } else {
+                Write-Host "❌ File integrity check failed - will re-download" -ForegroundColor Red
+                Remove-Item $FilePath -Force
+            }
+        } else {
+            Write-Host "❌ File size mismatch - will re-download" -ForegroundColor Red
+            Remove-Item $FilePath -Force
+        }
+    }
+    
+    return $false
+}
+
+function Test-FileIntegrity {
+    param([string]$FilePath)
+    
+    if (-not (Test-Path $FilePath)) {
+        return $false
+    }
+    
+    Write-Host "🔍 Verifying file integrity..." -ForegroundColor Yellow
+    
+    # Check file size
+    $FileSize = (Get-Item $FilePath).Length
+    if ($FileSize -ne $ExpectedSize) {
+        Write-Host "❌ Size mismatch: $FileSize != $ExpectedSize" -ForegroundColor Red
+        return $false
+    }
+    
+    # If we have checksums, verify them
+    if ($ExpectedMD5 -or $ExpectedSHA256) {
+        Write-Host "🔐 Computing checksums..." -ForegroundColor Yellow
+        
+        if ($ExpectedMD5) {
+            $ComputedMD5 = (Get-FileHash $FilePath -Algorithm MD5).Hash
+            if ($ComputedMD5 -ne $ExpectedMD5) {
+                Write-Host "❌ MD5 mismatch: $ComputedMD5 != $ExpectedMD5" -ForegroundColor Red
+                return $false
+            }
+        }
+        
+        if ($ExpectedSHA256) {
+            $ComputedSHA256 = (Get-FileHash $FilePath -Algorithm SHA256).Hash
+            if ($ComputedSHA256 -ne $ExpectedSHA256) {
+                Write-Host "❌ SHA256 mismatch: $ComputedSHA256 != $ExpectedSHA256" -ForegroundColor Red
+                return $false
+            }
+        }
+        
+        Write-Host "✅ Checksums verified" -ForegroundColor Green
+    }
+    
+    Write-Host "✅ File integrity verified" -ForegroundColor Green
+    return $true
+}
+
+function Invoke-DownloadWithProgress {
+    param(
+        [string]$Url,
+        [string]$OutputFile,
+        [string]$SourceName
+    )
+    
+    try {
+        Write-Host "🌐 Connecting to $SourceName..." -ForegroundColor Yellow
+        
+        # Create WebClient with progress reporting
+        $WebClient = New-Object System.Net.WebClient
+        
+        # Register progress event
+        Register-ObjectEvent -InputObject $WebClient -EventName DownloadProgressChanged -Action {
+            $Global:DownloadProgress = $Event.SourceEventArgs.ProgressPercentage
+            $Global:BytesReceived = $Event.SourceEventArgs.BytesReceived
+            $Global:TotalBytes = $Event.SourceEventArgs.TotalBytesToReceive
+        } | Out-Null
+        
+        # Register completion event
+        Register-ObjectEvent -InputObject $WebClient -EventName DownloadFileCompleted -Action {
+            $Global:DownloadComplete = $true
+            $Global:DownloadError = $Event.SourceEventArgs.Error
+        } | Out-Null
+        
+        # Initialize progress variables
+        $Global:DownloadProgress = 0
+        $Global:BytesReceived = 0
+        $Global:TotalBytes = 0
+        $Global:DownloadComplete = $false
+        $Global:DownloadError = $null
+        
+        # Start download
+        $WebClient.DownloadFileAsync($Url, $OutputFile)
+        
+        # Show progress
+        $LastProgress = -1
+        while (-not $Global:DownloadComplete) {
+            if ($Global:DownloadProgress -ne $LastProgress) {
+                $ProgressMB = [math]::Round($Global:BytesReceived / 1MB, 1)
+                $TotalMB = [math]::Round($Global:TotalBytes / 1MB, 1)
+                
+                Write-Progress -Activity "📥 Downloading from $SourceName" `
+                              -Status "$ProgressMB MB / $TotalMB MB" `
+                              -PercentComplete $Global:DownloadProgress
+                
+                $LastProgress = $Global:DownloadProgress
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        
+        # Complete progress bar
+        Write-Progress -Activity "📥 Downloading from $SourceName" -Completed
+        
+        # Clean up events
+        Get-EventSubscriber | Unregister-Event
+        $WebClient.Dispose()
+        
+        # Check for errors
+        if ($Global:DownloadError) {
+            throw $Global:DownloadError
+        }
+        
+        Write-Host "✅ Download completed from $SourceName" -ForegroundColor Green
+        return $true
+        
+    } catch {
+        Write-Host "❌ Download failed from $SourceName`: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Start-Download {
+    param([hashtable]$Mirror)
+    
+    Write-Host "`n🔄 Attempting download from: $($Mirror.Name)" -ForegroundColor Cyan
+    
+    $OutputFile = Join-Path $OutputPath $FileName
+    
+    try {
+        # Handle special cases for different platforms
+        if ($Mirror.Url -like "*drive.google.com*") {
+            Write-Host "⚠️  Google Drive may require manual download for large files" -ForegroundColor Yellow
+            Write-Host "🔗 Please visit: $($Mirror.Url)" -ForegroundColor White
+            return $false
+        } elseif ($Mirror.Url -like "*pan.baidu.com*") {
+            Write-Host "⚠️  百度网盘需要手动下载，请访问链接并使用提取码: cqt1" -ForegroundColor Yellow
+            Write-Host "🔗 链接: $($Mirror.Url)" -ForegroundColor White
+            return $false
+        } else {
+            return Invoke-DownloadWithProgress -Url $Mirror.Url -OutputFile $OutputFile -SourceName $Mirror.Name
+        }
+        
+    } catch {
+        Write-Host "❌ Download failed from $($Mirror.Name): $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Main {
+    # Print banner
+    Write-Banner
+    
+    # Ensure output directory exists
+    if (-not (Test-Path $OutputPath)) {
+        New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
+    }
+    
+    $OutputFile = Join-Path $OutputPath $FileName
+    
+    # Check if file already exists and is valid
+    if (-not $Force -and (Test-ExistingFile $OutputFile)) {
+        return
+    }
+    
+    Write-Host "`n🚀 Starting download process..." -ForegroundColor Green
+    
+    # Try each mirror in order of priority
+    foreach ($Mirror in $DownloadMirrors) {
+        if (Start-Download $Mirror) {
+            # Verify the downloaded file
+            if (Test-FileIntegrity $OutputFile) {
+                Write-Host "`n🎉 Successfully downloaded from $($Mirror.Name)!" -ForegroundColor Green
+                Write-Host "📁 File location: $(Resolve-Path $OutputFile)" -ForegroundColor White
+                Write-Host "✅ Ready to use!" -ForegroundColor Green
+                return
+            } else {
+                Write-Host "❌ File verification failed for $($Mirror.Name)" -ForegroundColor Red
+                if (Test-Path $OutputFile) {
+                    Remove-Item $OutputFile -Force
+                }
+                continue
+            }
+        }
+        
+        Write-Host "❌ Failed to download from $($Mirror.Name)" -ForegroundColor Red
+        Start-Sleep -Seconds 2  # Brief pause before trying next mirror
+    }
+    
+    Write-Host "`n❌ All download attempts failed!" -ForegroundColor Red
+    Write-Host "📞 Please try manual download or contact support" -ForegroundColor Yellow
+}
+
+# Run main function
+try {
+    Main
+    
+    Write-Host "`n🎯 Next steps:" -ForegroundColor Cyan
+    Write-Host "1. Run ColorQuantificationTool.exe" -ForegroundColor White
+    Write-Host "2. Follow the user guide for detailed instructions" -ForegroundColor White
+    Write-Host "3. Enjoy your color analysis!" -ForegroundColor White
+    
+} catch {
+    Write-Host "`n❌ Unexpected error: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "🆘 Need help?" -ForegroundColor Yellow
+    Write-Host "- Check your internet connection" -ForegroundColor White
+    Write-Host "- Try running as administrator" -ForegroundColor White
+    Write-Host "- Visit our support page for manual download links" -ForegroundColor White
+}
+
+Write-Host "`nPress any key to exit..." -ForegroundColor Gray
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
