@@ -55,11 +55,6 @@ The full desktop application offers advanced features:
 
 **Latest Version: v1.0.0** | **File Size: 1.1GB** | **Platform: Windows 64-bit**
 
-### Primary Download Links:
-- 🔗 **Google Drive**: [Download ColorQuantificationTool.exe](https://drive.google.com/file/d/your-file-id/view)
-- 🔗 **OneDrive**: [Download ColorQuantificationTool.exe](https://onedrive.live.com/download?cid=your-cid)
-- 🔗 **SourceForge**: [Download](https://sourceforge.net/projects/colorquantificationtool/)
-
 ### System Requirements:
 - **OS**: Windows 10/11 (64-bit)
 - **RAM**: 8GB minimum, 16GB recommended
@@ -114,11 +109,7 @@ This project is licensed under the MIT License.
 - Color science algorithms based on CIE standards
 - Special thanks to the open-source community
 
-## 📞 Support
 
-- 🐛 **Issues**: [GitHub Issues](https://github.com/your-username/ColorQuantificationTool/issues)
-- 📧 **Email**: For technical support
-- 💬 **Community**: Join our user community
 
 ---
 
